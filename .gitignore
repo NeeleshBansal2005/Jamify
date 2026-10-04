@@ -9,7 +9,7 @@ lerna-debug.log*
 
 node_modules
 dist
-dist-ssr
+aldist-ssr
 *.local
 
 # Editor directories and files
@@ -22,3 +22,24 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+*.env
+*.env.loc
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Playwright
+playwright-report/
+test-results/
+playwright/.auth/
+
+# Local secret/password files
+*password*.txt
+
+# Vite cache
+.vite/
+**/.vite/
+
+# Temporary nested Git backup
+Frontend-git-backup/
