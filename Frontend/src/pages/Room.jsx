@@ -243,21 +243,28 @@ useEffect(() => {
 
   const handlePlay = () => changePlayback("play");
   const handlePause = () => changePlayback("pause");
-const handleSkip=async()=>{
-  try{
-    const response =await fetch(`http://localhost:5000/rooms/${id}/skip`,{
-      method:"POST",
-    })
-    const data =await response.json()
-    setRoom(data)
-    
+const handleSkip = async () => {
+  try {
+    const response = await fetch(
+      `http://localhost:5000/rooms/${id}/skip`,
+      {
+        method: "POST",
+        credentials: "include",
+      }
+    );
 
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || "Failed to skip track");
+    }
+
+    setRoom(data);
+  } catch (error) {
+    console.error("failed to skip track", error);
+    setPlaybackError(error.message);
   }
-  catch(error){
-    console.error("failed to skip track",error);
-    
-  }
-}
+};
 const handleTrackEnd = () => {
   // The server clears the current track when the queue is empty, or advances
   // to the next track when one exists.  Always notify it so room state does

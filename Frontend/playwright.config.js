@@ -69,7 +69,8 @@ export default defineConfig({
         PORT: "5000",
         MONGODB_URI: process.env.JAMIFY_E2E_MONGODB_URI,
         REDIS_URL: process.env.JAMIFY_E2E_REDIS_URL,
-        JWT_SECRET: process.env.JAMIFY_E2E_JWT_SECRET
+        JWT_SECRET: process.env.JAMIFY_E2E_JWT_SECRET,
+          MUSIC_PROVIDER_BASE_URL: "http://localhost:5050"
       }
     },
     {
@@ -78,6 +79,7 @@ export default defineConfig({
       url: frontendUrl,
       timeout: 120_000,
       reuseExistingServer: !process.env.CI
-    }
+    },
+ 
   ]
 });

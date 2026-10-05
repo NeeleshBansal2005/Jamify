@@ -10,9 +10,9 @@ router.get("/",getRooms);
 router.get("/:id",getRoomById);
 router.post("/:roomId/queue", authMiddleware, addSongToQueue);
 router.delete("/:roomId/queue/:songId", authMiddleware, removeSongFromQueue);
-router.post("/:id/play", startPlayback);
-router.post("/:id/pause",pausePlayback)
-router.post("/:id/skip",skipTrack)
+router.post("/:id/play", authMiddleware, startPlayback);
+router.post("/:id/pause", authMiddleware, pausePlayback);
+router.post("/:id/skip", authMiddleware, skipTrack);
 router.post("/:roomId/join", authMiddleware, joinRoom);
 router.post("/:roomId/leave", authMiddleware, leaveRoom);
 export default router;

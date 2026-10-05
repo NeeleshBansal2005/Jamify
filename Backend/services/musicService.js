@@ -1,4 +1,5 @@
 const JIOSAAVN_BASE_URL =
+  process.env.MUSIC_PROVIDER_BASE_URL ||
   "https://jiosaavnapi-dusky.vercel.app";
 
 // ==========================================================
