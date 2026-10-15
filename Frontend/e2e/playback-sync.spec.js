@@ -110,8 +110,18 @@ test.describe("realtime playback synchronization", () => {
         waitForTrack(users.userB.page, first.track)
       ]);
 
-      await skipButton(users.userA.page).click();
-      await waitForTrack(users.userB.page, second.track);
+const responsePromise = users.userA.page.waitForResponse(
+  response =>
+    response.url().includes(`/rooms/${room._id}/skip`) &&
+    response.request().method() === "POST"
+);
+
+await skipButton(users.userA.page).click();
+
+const response = await responsePromise;
+
+console.log("SKIP STATUS:", response.status());
+console.log("SKIP BODY:", await response.text());      await waitForTrack(users.userB.page, second.track);
 
       await expect
   .poll(

@@ -8,7 +8,7 @@ dotenv.config({
   path: path.resolve(process.cwd(), ".env.e2e")
 });
 const frontendDirectory = path.dirname(fileURLToPath(import.meta.url));
-const backendDirectory = path.resolve(frontendDirectory, "../Backend");
+const backendDirectory = path.resolve(frontendDirectory, "./Backend");
 
 // The frontend currently calls localhost:5000 directly and the backend allows
 // localhost:5173 through CORS, so the E2E servers intentionally use those
@@ -69,7 +69,8 @@ export default defineConfig({
         PORT: "5000",
         MONGODB_URI: process.env.JAMIFY_E2E_MONGODB_URI,
         REDIS_URL: process.env.JAMIFY_E2E_REDIS_URL,
-        JWT_SECRET: process.env.JAMIFY_E2E_JWT_SECRET
+        JWT_SECRET: process.env.JAMIFY_E2E_JWT_SECRET,
+          MUSIC_PROVIDER_BASE_URL: "http://localhost:5050"
       }
     },
     {
@@ -78,6 +79,5 @@ export default defineConfig({
       url: frontendUrl,
       timeout: 120_000,
       reuseExistingServer: !process.env.CI
-    }
-  ]
+    },]
 });

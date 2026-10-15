@@ -180,6 +180,14 @@ Server changes authoritative state, then broadcasts the resulting state.
 
 Playback is backend-controlled.
 
+Any authenticated room member may use the shared play, pause, and skip
+commands. The backend verifies membership before changing room state; the host
+is not the sole playback controller.
+
+Late joiners seek from `playbackPosition` and `playbackStartedAt`. If a browser
+blocks automatic audio, the regular local Play control starts that listener at
+the current server position without changing shared room state.
+
 Play
 Frontend
   POST /rooms/:id/play

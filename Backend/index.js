@@ -92,9 +92,28 @@ io.on("connection", (socket) => {
       socket.emit("room-join-error", { message: "Join this room before connecting to its playback" });
       return;
     }
+     
 
-    socket.join(roomId); // join the socket to the specified room
-    socket.emit("room-joined", { roomId });
+    socket.join(roomId);
+
+// Fetch room state after joining so the late-joining client
+// receives the current track, queue and playback timing.
+const roomSnapshot = await Room.findById(roomId).lean();
+
+if (!roomSnapshot) {
+  socket.leave(roomId);
+
+  socket.emit("room-join-error", {
+    message: "Room no longer exists"
+  });
+
+  return;
+}
+
+socket.emit("room-joined", {
+  roomId,
+  room: roomSnapshot
+});
     io.to(roomId).emit("user-joined", socket.data.userId); // notify other users in the room that a new user has joined
 
     console.log(
