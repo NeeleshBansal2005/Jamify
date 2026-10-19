@@ -28,34 +28,3 @@ export const requireRoomHost = async (req, res, next) => {
     });
   }
 };
-
-export const requireRoomMember = async (req, res, next) => {
-  try {
-    const room = await Room.findById(req.params.id);
-
-    if (!room) {
-      return res.status(404).json({
-        error: "Room doesn't exist"
-      });
-    }
-
-    const userId = String(req.user?.id ?? "");
-    const isMember = room.members.some(
-      (member) => String(member.user) === userId
-    );
-
-    if (!userId || !isMember) {
-      return res.status(403).json({
-        error: "Join this room before controlling playback"
-      });
-    }
-
-    next();
-  } catch (error) {
-    console.error("Room membership authorization failed:", error);
-
-    return res.status(500).json({
-      error: "Failed to verify room membership"
-    });
-  }
-};

@@ -9,7 +9,6 @@ import {
   readRoom,
   serverPlaybackPosition,
   skipButton,
-  waitForPlaybackControl,
   waitForTrack
 } from "./helpers/jamify.js";
 
@@ -40,17 +39,35 @@ test.describe("realtime playback synchronization", () => {
         waitForTrack(users.userB.page, track)
       ]);
 
+      await expect(
+        users.userB.page.getByRole("button", { name: "Pause playback" })
+      ).toHaveCount(0);
+      await expect(
+        users.userB.page.locator("svg.lucide-skip-forward")
+      ).toHaveCount(0);
+
+      const nonHostPause = await users.userB.api.post(
+        `/rooms/${room._id}/pause`
+      );
+      expect(nonHostPause.status()).toBe(403);
+
       // Adding the first track starts the current implementation automatically.
       // Pause first, then use User A's real UI action to verify play propagation.
       await users.userA.page
         .getByRole("button", { name: "Pause playback" })
         .click();
-      await waitForPlaybackControl(users.userB.page, "Play playback");
+      await expect.poll(async () => {
+        const storedRoom = await readRoom(users.userA, room._id);
+        return storedRoom.isPlaying;
+      }).toBe(false);
 
       await users.userA.page
         .getByRole("button", { name: "Play playback" })
         .click();
-      await waitForPlaybackControl(users.userB.page, "Pause playback");
+      await expect.poll(async () => {
+        const storedRoom = await readRoom(users.userA, room._id);
+        return storedRoom.isPlaying;
+      }).toBe(true);
 
       const storedRoom = await readRoom(users.userA, room._id);
       expect(storedRoom.isPlaying).toBe(true);
@@ -74,7 +91,11 @@ test.describe("realtime playback synchronization", () => {
       await users.userA.page
         .getByRole("button", { name: "Pause playback" })
         .click();
-      await waitForPlaybackControl(users.userB.page, "Play playback");
+
+      await expect.poll(async () => {
+        const updatedRoom = await readRoom(users.userA, room._id);
+        return updatedRoom.isPlaying;
+      }).toBe(false);
 
       let storedRoom = await readRoom(users.userA, room._id);
       expect(storedRoom.isPlaying).toBe(false);
@@ -84,11 +105,11 @@ test.describe("realtime playback synchronization", () => {
       await users.userA.page
         .getByRole("button", { name: "Play playback" })
         .click();
-      await waitForPlaybackControl(users.userB.page, "Pause playback");
 
-      storedRoom = await readRoom(users.userA, room._id);
-      expect(storedRoom.isPlaying).toBe(true);
-      expect(storedRoom.playbackStartedAt).toBeTruthy();
+      await expect.poll(async () => {
+        storedRoom = await readRoom(users.userA, room._id);
+        return Boolean(storedRoom.isPlaying && storedRoom.playbackStartedAt);
+      }).toBe(true);
     } finally {
       await disposeUsers(users);
     }
@@ -110,18 +131,17 @@ test.describe("realtime playback synchronization", () => {
         waitForTrack(users.userB.page, first.track)
       ]);
 
-const responsePromise = users.userA.page.waitForResponse(
-  response =>
-    response.url().includes(`/rooms/${room._id}/skip`) &&
-    response.request().method() === "POST"
-);
+      const responsePromise = users.userA.page.waitForResponse(
+        (response) =>
+          response.url().includes(`/rooms/${room._id}/skip`) &&
+          response.request().method() === "POST"
+      );
 
-await skipButton(users.userA.page).click();
+      await skipButton(users.userA.page).click();
 
-const response = await responsePromise;
-
-console.log("SKIP STATUS:", response.status());
-console.log("SKIP BODY:", await response.text());      await waitForTrack(users.userB.page, second.track);
+      const response = await responsePromise;
+      expect(response.status()).toBe(200);
+      await waitForTrack(users.userB.page, second.track);
 
       await expect
   .poll(
@@ -184,13 +204,26 @@ expect(storedRoom.playbackPosition).toBe(0);
         )
         .toBeGreaterThan(1);
 
+      await expect
+        .poll(
+          () => users.userB.page.locator("audio").evaluate((audio) => audio.paused),
+          { message: "User B did not start playback after seeking" }
+        )
+        .toBe(false);
+
       const storedRoom = await readRoom(users.userA, room._id);
       const expectedPosition = serverPlaybackPosition(storedRoom);
-      const browserPosition = await users.userB.page
+      const browserPlayback = await users.userB.page
         .locator("audio")
-        .evaluate((audio) => audio.currentTime);
+        .evaluate((audio) => ({
+          currentTime: audio.currentTime,
+          duration: audio.duration,
+          paused: audio.paused,
+          readyState: audio.readyState
+        }));
+      const browserPosition = browserPlayback.currentTime;
 
-      expect(Math.abs(browserPosition - expectedPosition)).toBeLessThan(5);
+      expect(Math.abs(browserPosition - expectedPosition)).toBeLessThan(2);
     } finally {
       await disposeUsers(users);
     }

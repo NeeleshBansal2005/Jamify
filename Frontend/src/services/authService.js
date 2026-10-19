@@ -1,7 +1,9 @@
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+
 //frontend ka backend se api communication ka code , "Backend ko login request exactly kaise bhejni hai."
 export const loginUser = async (email, password) => {
 
-  const res = await fetch("http://localhost:5000/auth/login", {
+  const res = await fetch(`${API_URL}/auth/login`, {
 
     method: "POST",
 
@@ -33,7 +35,7 @@ export const loginUser = async (email, password) => {
 // The browser automatically sends the HttpOnly accessToken cookie.
 export const getCurrentUser = async () => {
 
-  const res = await fetch("http://localhost:5000/auth/me", {
+  const res = await fetch(`${API_URL}/auth/me`, {
 
     method: "GET",
 
@@ -60,7 +62,7 @@ export const getCurrentUser = async () => {
 // The browser sends the HttpOnly cookies; JavaScript never reads the tokens.
 export const logoutUser = async () => {
 
-  const res = await fetch("http://localhost:5000/auth/logout", {
+  const res = await fetch(`${API_URL}/auth/logout`, {
 
     method: "POST",
 

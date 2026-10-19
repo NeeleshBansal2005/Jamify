@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react"; //useref is to control audio element through react
+import { useState, useEffect, useRef, useCallback } from "react"; //useref is to control audio element through react
 import { Play, Pause, SkipForward, Share2, ChevronLeft, Search, X, Disc3, Music, GripVertical, Crown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,6 +14,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { searchMusic } from "@/services/musicService.js";
 import { getPlaybackPosition } from "@/utils/playback.js"; // Import the getPlaybackPosition function
 import { useAuth } from "../AuthContext";
+
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 const formatTime = (seconds) => {
   if (!seconds || Number.isNaN(seconds)) return "0:00";
@@ -179,8 +181,9 @@ export default function Rooms() {
     if (!audio) return;
     audio.pause();
     if (!trackId) return;
-    // React's onLoadedMetadata handler is already attached to the element.
-    audio.load();
+    // Changing the audio element's src causes the browser to load the new
+    // media. Calling audio.load() here can start a second load after metadata
+    // arrives, reset currentTime to zero, and undo a late joiner's seek.
   }, [room?.currentTrack?.providerTrackId]);
   // The only effect that seeks and starts playback.
 
@@ -205,9 +208,11 @@ export default function Rooms() {
       if (Math.abs(audio.currentTime - target) > 0.25) {
         await new Promise((resolve, reject) => {
           let finished = false;
+          let timeoutId;
           const cleanup = () => {
             audio.removeEventListener("seeked", onSeeked);
             audio.removeEventListener("error", onError);
+            window.clearTimeout(timeoutId);
             if (cancelPendingSeek === cancel) {
               cancelPendingSeek = null;
             }
@@ -227,10 +232,11 @@ export default function Rooms() {
           audio.addEventListener("seeked", onSeeked);
           audio.addEventListener("error", onError);
           try {
+            timeoutId = window.setTimeout(
+              () => finish(new Error("Audio seek timed out")),
+              5000
+            );
             audio.currentTime = target;
-            if (!audio.seeking) {
-              finish();
-            }
           } catch (error) {
             finish(error);
           }
@@ -288,7 +294,7 @@ export default function Rooms() {
     setIsPlaybackRequestPending(true);
     setPlaybackError("");
     try {
-      const response = await fetch(`http://localhost:5000/rooms/${id}/${action}`, {
+      const response = await fetch(`${API_URL}/rooms/${id}/${action}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
@@ -313,7 +319,7 @@ export default function Rooms() {
 
   const handlePause = () => changePlayback("pause");
 
-  const resumeSyncedAudio = () => {
+  const resumeSyncedAudio = useCallback(() => {
     const audio = audioRef.current;
     const latestRoom = roomRef.current;
 
@@ -344,7 +350,16 @@ export default function Rooms() {
       console.error("Failed to prepare local synced audio:", error);
       setAutoplayBlocked(true);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (!autoplayBlocked) return undefined;
+
+    const resumeOnInteraction = () => resumeSyncedAudio();
+    window.addEventListener("pointerdown", resumeOnInteraction, { once: true });
+
+    return () => window.removeEventListener("pointerdown", resumeOnInteraction);
+  }, [autoplayBlocked, resumeSyncedAudio]);
 
   const handleSkip = async () => {
     // Prevent duplicate skip requests from repeated clicks.
@@ -353,7 +368,7 @@ export default function Rooms() {
     setPlaybackError("");
     try {
       const response = await fetch(
-        `http://localhost:5000/rooms/${id}/skip`,
+        `${API_URL}/rooms/${id}/skip`,
         {
           method: "POST",
           credentials: "include"
@@ -661,15 +676,18 @@ export default function Rooms() {
                 {playbackError}
               </p>
             )}
+            {autoplayBlocked && isPlaying && (
+              <p className="mt-1 text-[10px] text-neutral-500">
+                Tap anywhere to enable audio
+              </p>
+            )}
           </div>
-          <div className="flex items-center gap-2 sm:gap-4 pr-2 shrink-0">
+          {isHost && (
+            <div className="flex items-center gap-2 sm:gap-4 pr-2 shrink-0">
               <button
                 type="button"
                 disabled={!hasTrack || isPlaybackRequestPending}
-                aria-label={
-                  autoplayBlocked && isPlaying ? "Play audio" :
-                    isPlaying ? "Pause playback" : "Play playback"
-                }
+                aria-label={isPlaying ? "Pause playback" : "Play playback"}
                 onClick={() => {
                   if (!hasTrack || isPlaybackRequestPending) return;
                   if (autoplayBlocked && isPlaying) {
@@ -680,15 +698,16 @@ export default function Rooms() {
                 }}
                 className={`w-12 h-12 rounded-full flex items-center justify-center transition-all shadow-md active:scale-95 ${hasTrack && !isPlaybackRequestPending ? "bg-white text-black hover:scale-105" : "bg-neutral-800 text-neutral-600 cursor-not-allowed"}`}
               >
-                {isPlaying && hasTrack && !autoplayBlocked ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" className="ml-1" />}
+                {isPlaying && hasTrack ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" className="ml-1" />}
               </button>
-              <button disabled={!hasTrack} onClick={handleSkip} className={`text-neutral-400 hover:text-white transition-colors active:scale-95 ${!hasTrack ? "opacity-30 cursor-not-allowed"
+              <button disabled={!hasTrack} onClick={handleSkip} className={`text-neutral-400 hover:text-white transition-colors hidden sm:block active:scale-95 ${!hasTrack ? "opacity-30 cursor-not-allowed"
                 : ""
                 }`}
               >
                 <SkipForward size={20} fill="currentColor" className="opacity-50 hover:opacity-100" />
               </button>
-          </div>
+            </div>
+          )}
         </motion.div>
       </div>
     </div>

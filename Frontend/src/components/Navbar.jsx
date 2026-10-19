@@ -16,6 +16,7 @@ import {
 
 const GENRES = ["Pop", "Lo-Fi", "Hip-Hop", "Electronic", "Acoustic"];
 const VIBES = ["Chill", "Energetic", "Focus", "Hype", "Relaxed"];
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 export default function Navbar() {
   const navigate = useNavigate();
@@ -55,7 +56,7 @@ export default function Navbar() {
 
     // sending POST request to backend
     const res = await fetch(
-      "http://localhost:5000/rooms",
+      `${API_URL}/rooms`,
       {
 
         method: "POST",

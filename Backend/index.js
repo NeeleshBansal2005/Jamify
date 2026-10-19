@@ -31,11 +31,12 @@ const app = express();
 const server = http.createServer(app);
 
 const port = process.env.PORT || 5000;
+const clientOrigin = process.env.CLIENT_ORIGIN || "http://localhost:5173";
 
 // creating socket.io server
 const io = new Server(server, {
   cors: {
-    origin: "http://localhost:5173", // frontend vite server
+    origin: clientOrigin,
     methods: ["GET", "POST"],
     credentials: true
   }
@@ -135,7 +136,7 @@ socket.emit("room-joined", {
 
 
 app.use(cors({
-  origin: "http://localhost:5173",
+  origin: clientOrigin,
   credentials: true
 }));
 

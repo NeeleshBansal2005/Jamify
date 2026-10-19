@@ -180,9 +180,8 @@ Server changes authoritative state, then broadcasts the resulting state.
 
 Playback is backend-controlled.
 
-Any authenticated room member may use the shared play, pause, and skip
-commands. The backend verifies membership before changing room state; the host
-is not the sole playback controller.
+Only the room host may use shared play, pause, and skip commands. The frontend
+hides those controls for listeners, and the backend enforces the same rule.
 
 Late joiners seek from `playbackPosition` and `playbackStartedAt`. If a browser
 blocks automatic audio, the regular local Play control starts that listener at
@@ -472,10 +471,10 @@ Do not rebuild earlier systems from scratch.
 22. E2E Testing Foundation
 
 Playwright E2E tests live in `Frontend/e2e/` and use the real frontend,
-Express backend, MongoDB, Redis, cookie authentication, Socket.IO, and music
-provider. The suite creates distinct temporary User A/User B accounts and
-opens them in separate browser contexts; it does not use two tabs sharing one
-session.
+Express backend, MongoDB, Redis, cookie authentication, Socket.IO, and a local
+music-provider stub that serves a real ranged WAV stream. The suite creates
+distinct temporary User A/User B accounts and opens them in separate browser
+contexts; it does not use two tabs sharing one session.
 
 Available commands from `Frontend/`:
 

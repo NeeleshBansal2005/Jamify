@@ -1,18 +1,20 @@
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+
 export const getRooms = async () => {
 
-  const res = await fetch("http://localhost:5000/rooms");
+  const res = await fetch(`${API_URL}/rooms`);
 
   const data = await res.json();
 
   return data;
 };
 export const getRoomById = async (id) => {
-    const res = await fetch(`http://localhost:5000/rooms/${id}`);
+    const res = await fetch(`${API_URL}/rooms/${id}`);
     const data = await res.json();
     return data;
 }
 export const joinRoom = async (roomId) => {
-  const res = await fetch(`http://localhost:5000/rooms/${roomId}/join`, {
+  const res = await fetch(`${API_URL}/rooms/${roomId}/join`, {
     method: "POST",
     credentials: "include"
   });
@@ -26,7 +28,7 @@ export const joinRoom = async (roomId) => {
 };
 export const addsongToQueue = async (roomId, song) => {
 
-  const res = await fetch(`http://localhost:5000/rooms/${roomId}/queue`, {
+  const res = await fetch(`${API_URL}/rooms/${roomId}/queue`, {
     method: "POST",
     credentials: "include",
     headers: {
@@ -40,7 +42,7 @@ export const addsongToQueue = async (roomId, song) => {
   return data;
 }
 export const removeSongfromqueue = async (roomId, songId) => {
-    const res = await fetch(`http://localhost:5000/rooms/${roomId}/queue/${songId}`, {
+    const res = await fetch(`${API_URL}/rooms/${roomId}/queue/${songId}`, {
         method: "DELETE",
         credentials: "include",
         headers: {

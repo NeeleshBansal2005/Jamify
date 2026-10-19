@@ -41,6 +41,7 @@ and login endpoints. Its browser contexts are independent, so User A and User
 B have different HttpOnly-cookie sessions. Playwright screenshots and traces
 are retained on failure; reports and any stored auth state are ignored by Git.
 
-The music provider is intentionally real. If the JioSaavn service or its
-audio stream is unavailable, the relevant test fails rather than replacing the
-core realtime path with a mock.
+The E2E provider is a local stub that returns deterministic track metadata and
+a real ranged WAV stream. Playwright therefore verifies the browser's actual
+`audio.currentTime` and playback state without depending on an external music
+service.

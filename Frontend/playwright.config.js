@@ -8,13 +8,13 @@ dotenv.config({
   path: path.resolve(process.cwd(), ".env.e2e")
 });
 const frontendDirectory = path.dirname(fileURLToPath(import.meta.url));
-const backendDirectory = path.resolve(frontendDirectory, "./Backend");
+const repositoryDirectory = path.resolve(frontendDirectory, "..");
+const backendDirectory = path.join(repositoryDirectory, "Backend");
 
-// The frontend currently calls localhost:5000 directly and the backend allows
-// localhost:5173 through CORS, so the E2E servers intentionally use those
-// established development addresses.
-const frontendUrl = "http://localhost:5173";
-const backendUrl = "http://localhost:5000";
+// E2E uses dedicated ports so it never reuses active development servers.
+const frontendUrl = "http://localhost:5174";
+const backendUrl = "http://localhost:5001";
+const musicProviderUrl = "http://localhost:5051";
 
 const requiredEnvironment = [
   "JAMIFY_E2E_MONGODB_URI",
@@ -53,31 +53,51 @@ export default defineConfig({
     {
       name: "chromium",
       use: {
-        ...devices["Desktop Chrome"]
+        ...devices["Desktop Chrome"],
+        launchOptions: {
+          args: ["--autoplay-policy=no-user-gesture-required"]
+        }
       }
     }
   ],
   webServer: [
     {
+      command: "node e2e/music-provider-stub.js",
+      cwd: backendDirectory,
+      url: `${musicProviderUrl}/health`,
+      timeout: 30_000,
+      reuseExistingServer: false,
+      env: {
+        ...process.env,
+        MUSIC_PROVIDER_PORT: "5051"
+      }
+    },
+    {
       command: "npm run start",
       cwd: backendDirectory,
       url: `${backendUrl}/rooms`,
       timeout: 120_000,
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false,
       env: {
         ...process.env,
-        PORT: "5000",
+        PORT: "5001",
         MONGODB_URI: process.env.JAMIFY_E2E_MONGODB_URI,
         REDIS_URL: process.env.JAMIFY_E2E_REDIS_URL,
         JWT_SECRET: process.env.JAMIFY_E2E_JWT_SECRET,
-          MUSIC_PROVIDER_BASE_URL: "http://localhost:5050"
+        CLIENT_ORIGIN: frontendUrl,
+        MUSIC_PROVIDER_BASE_URL: musicProviderUrl
       }
     },
     {
-      command: "npm run dev -- --host localhost --port 5173",
+      command: "npm run dev -- --host localhost --port 5174",
       cwd: frontendDirectory,
       url: frontendUrl,
       timeout: 120_000,
-      reuseExistingServer: !process.env.CI
-    },]
+      reuseExistingServer: false,
+      env: {
+        ...process.env,
+        VITE_API_URL: backendUrl
+      }
+    }
+  ]
 });

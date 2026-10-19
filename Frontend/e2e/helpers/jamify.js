@@ -1,7 +1,7 @@
 import { expect, request } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 
-export const backendUrl = "http://localhost:5000";
+export const backendUrl = "http://localhost:5001";
 
 const makeAccount = (role) => {
   const uniqueId = `${Date.now()}-${randomUUID().slice(0, 8)}`;

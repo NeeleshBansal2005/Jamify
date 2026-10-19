@@ -1,0 +1,829 @@
+diff --git a/Backend/e2e/music-provider-stub.js b/Backend/e2e/music-provider-stub.js
+index d37a913..b9db5a7 100644
+--- a/Backend/e2e/music-provider-stub.js
++++ b/Backend/e2e/music-provider-stub.js
+@@ -1,11 +1,35 @@
+ import express from "express";
+ 
+ const app = express();
+-const PORT = 5050;
++const PORT = Number(process.env.MUSIC_PROVIDER_PORT || 5051);
++const AUDIO_DURATION_SECONDS = 90;
++const SAMPLE_RATE = 8_000;
+ 
+-const testSong = {
+-  id: "e2e-track-1",
+-  name: "E2E Test Track",
++const createSilentWav = () => {
++  const dataSize = SAMPLE_RATE * AUDIO_DURATION_SECONDS * 2;
++  const wav = Buffer.alloc(44 + dataSize);
++
++  wav.write("RIFF", 0);
++  wav.writeUInt32LE(36 + dataSize, 4);
++  wav.write("WAVEfmt ", 8);
++  wav.writeUInt32LE(16, 16);
++  wav.writeUInt16LE(1, 20);
++  wav.writeUInt16LE(1, 22);
++  wav.writeUInt32LE(SAMPLE_RATE, 24);
++  wav.writeUInt32LE(SAMPLE_RATE * 2, 28);
++  wav.writeUInt16LE(2, 32);
++  wav.writeUInt16LE(16, 34);
++  wav.write("data", 36);
++  wav.writeUInt32LE(dataSize, 40);
++
++  return wav;
++};
++
++const audio = createSilentWav();
++
++const makeTestSong = (id, name) => ({
++  id,
++  name,
+   artists: {
+     primary: [
+       {
+@@ -13,33 +37,45 @@ const testSong = {
+       }
+     ]
+   },
+-  duration: 180,
++  duration: AUDIO_DURATION_SECONDS,
+   image: [
+     {
+       quality: "500x500",
+       url: "https://example.com/test-cover.jpg"
+     }
+   ],
+-  url: "https://example.com/e2e-track-1",
++  url: `http://localhost:${PORT}/tracks/${id}`,
+   downloadUrl: [
+     {
+       quality: "160kbps",
+-      url: "https://example.com/e2e-track-1.mp3"
++      url: `http://localhost:${PORT}/audio/${id}.wav`
+     }
+   ]
+-};
++});
++
++const testSongs = [
++  makeTestSong("e2e-track-1", "E2E Test Track One"),
++  makeTestSong("e2e-track-2", "E2E Test Track Two")
++];
++
++app.get("/health", (req, res) => res.sendStatus(204));
+ 
+ app.get("/api/search/songs", (req, res) => {
++  const query = String(req.query.query || "").toLowerCase();
++  const song = query.includes("kesariya") ? testSongs[1] : testSongs[0];
++
+   res.json({
+     success: true,
+     data: {
+-      results: [testSong]
++      results: [song]
+     }
+   });
+ });
+ 
+ app.get("/api/songs/:id", (req, res) => {
+-  if (req.params.id !== testSong.id) {
++  const song = testSongs.find((candidate) => candidate.id === req.params.id);
++
++  if (!song) {
+     return res.status(404).json({
+       success: false
+     });
+@@ -47,10 +83,49 @@ app.get("/api/songs/:id", (req, res) => {
+ 
+   res.json({
+     success: true,
+-    data: [testSong]
++    data: [song]
++  });
++});
++
++app.get("/audio/:id.wav", (req, res) => {
++  if (!testSongs.some((song) => song.id === req.params.id)) {
++    return res.sendStatus(404);
++  }
++
++  const range = req.headers.range;
++
++  if (range) {
++    const [startValue, endValue] = range.replace("bytes=", "").split("-");
++    const start = Number.parseInt(startValue, 10);
++    const end = endValue
++      ? Number.parseInt(endValue, 10)
++      : audio.length - 1;
++
++    if (!Number.isInteger(start) || start < 0 || start >= audio.length) {
++      return res.status(416).set("Content-Range", `bytes */${audio.length}`).end();
++    }
++
++    const boundedEnd = Math.min(end, audio.length - 1);
++    const chunk = audio.subarray(start, boundedEnd + 1);
++
++    return res.status(206).set({
++      "Content-Type": "audio/wav",
++      "Content-Length": chunk.length,
++      "Content-Range": `bytes ${start}-${boundedEnd}/${audio.length}`,
++      "Accept-Ranges": "bytes",
++      "Cache-Control": "no-store"
++    }).send(chunk);
++  }
++
++  res.set({
++    "Content-Type": "audio/wav",
++    "Content-Length": audio.length,
++    "Accept-Ranges": "bytes",
++    "Cache-Control": "no-store"
+   });
++  return res.send(audio);
+ });
+ 
+ app.listen(PORT, () => {
+   console.log(`E2E music provider running on ${PORT}`)
+-});
+\ No newline at end of file
++});
+diff --git a/Backend/index.js b/Backend/index.js
+index 1477030..e43a754 100644
+--- a/Backend/index.js
++++ b/Backend/index.js
+@@ -31,11 +31,12 @@ const app = express();
+ const server = http.createServer(app);
+ 
+ const port = process.env.PORT || 5000;
++const clientOrigin = process.env.CLIENT_ORIGIN || "http://localhost:5173";
+ 
+ // creating socket.io server
+ const io = new Server(server, {
+   cors: {
+-    origin: "http://localhost:5173", // frontend vite server
++    origin: clientOrigin,
+     methods: ["GET", "POST"],
+     credentials: true
+   }
+@@ -135,7 +136,7 @@ socket.emit("room-joined", {
+ 
+ 
+ app.use(cors({
+-  origin: "http://localhost:5173",
++  origin: clientOrigin,
+   credentials: true
+ }));
+ 
+diff --git a/Backend/middleware/roomAccess.js b/Backend/middleware/roomAccess.js
+index 9bc2434..999d7aa 100644
+--- a/Backend/middleware/roomAccess.js
++++ b/Backend/middleware/roomAccess.js
+@@ -28,34 +28,3 @@ export const requireRoomHost = async (req, res, next) => {
+     });
+   }
+ };
+-
+-export const requireRoomMember = async (req, res, next) => {
+-  try {
+-    const room = await Room.findById(req.params.id);
+-
+-    if (!room) {
+-      return res.status(404).json({
+-        error: "Room doesn't exist"
+-      });
+-    }
+-
+-    const userId = String(req.user?.id ?? "");
+-    const isMember = room.members.some(
+-      (member) => String(member.user) === userId
+-    );
+-
+-    if (!userId || !isMember) {
+-      return res.status(403).json({
+-        error: "Join this room before controlling playback"
+-      });
+-    }
+-
+-    next();
+-  } catch (error) {
+-    console.error("Room membership authorization failed:", error);
+-
+-    return res.status(500).json({
+-      error: "Failed to verify room membership"
+-    });
+-  }
+-};
+diff --git a/Backend/routes/rooms.js b/Backend/routes/rooms.js
+index f5ae4bb..b927ce0 100644
+--- a/Backend/routes/rooms.js
++++ b/Backend/routes/rooms.js
+@@ -4,16 +4,16 @@ import {addSongToQueue,removeSongFromQueue} from '../controllers/queueController
+ import { startPlayback } from '../controllers/roomsControllers.js';
+ import authMiddleware from '../middleware/auth.js';
+ import { joinRoom ,leaveRoom} from '../controllers/roomsControllers.js';
+-import { requireRoomMember } from "../middleware/roomAccess.js";
++import { requireRoomHost } from "../middleware/roomAccess.js";
+ const router = express.Router();
+ router.post("/",authMiddleware,createRoom);
+ router.get("/",getRooms);
+ router.get("/:id",getRoomById);
+ router.post("/:roomId/queue", authMiddleware, addSongToQueue);
+ router.delete("/:roomId/queue/:songId", authMiddleware, removeSongFromQueue);
+-router.post("/:id/play", authMiddleware, requireRoomMember, startPlayback);
+-router.post("/:id/pause", authMiddleware, requireRoomMember, pausePlayback);
+-router.post("/:id/skip", authMiddleware, requireRoomMember, skipTrack);;
++router.post("/:id/play", authMiddleware, requireRoomHost, startPlayback);
++router.post("/:id/pause", authMiddleware, requireRoomHost, pausePlayback);
++router.post("/:id/skip", authMiddleware, requireRoomHost, skipTrack);;
+ router.post("/:roomId/join", authMiddleware, joinRoom);
+ router.post("/:roomId/leave", authMiddleware, leaveRoom);
+ export default router;
+diff --git a/Frontend/e2e/README.md b/Frontend/e2e/README.md
+index d8a83d2..3f89859 100644
+--- a/Frontend/e2e/README.md
++++ b/Frontend/e2e/README.md
+@@ -41,6 +41,7 @@ and login endpoints. Its browser contexts are independent, so User A and User
+ B have different HttpOnly-cookie sessions. Playwright screenshots and traces
+ are retained on failure; reports and any stored auth state are ignored by Git.
+ 
+-The music provider is intentionally real. If the JioSaavn service or its
+-audio stream is unavailable, the relevant test fails rather than replacing the
+-core realtime path with a mock.
++The E2E provider is a local stub that returns deterministic track metadata and
++a real ranged WAV stream. Playwright therefore verifies the browser's actual
++`audio.currentTime` and playback state without depending on an external music
++service.
+diff --git a/Frontend/e2e/helpers/jamify.js b/Frontend/e2e/helpers/jamify.js
+index 816043c..bd9ac92 100644
+--- a/Frontend/e2e/helpers/jamify.js
++++ b/Frontend/e2e/helpers/jamify.js
+@@ -1,7 +1,7 @@
+ import { expect, request } from "@playwright/test";
+ import { randomUUID } from "node:crypto";
+ 
+-export const backendUrl = "http://localhost:5000";
++export const backendUrl = "http://localhost:5001";
+ 
+ const makeAccount = (role) => {
+   const uniqueId = `${Date.now()}-${randomUUID().slice(0, 8)}`;
+diff --git a/Frontend/e2e/playback-sync.spec.js b/Frontend/e2e/playback-sync.spec.js
+index 3088cfc..0c15e45 100644
+--- a/Frontend/e2e/playback-sync.spec.js
++++ b/Frontend/e2e/playback-sync.spec.js
+@@ -9,7 +9,6 @@ import {
+   readRoom,
+   serverPlaybackPosition,
+   skipButton,
+-  waitForPlaybackControl,
+   waitForTrack
+ } from "./helpers/jamify.js";
+ 
+@@ -40,17 +39,35 @@ test.describe("realtime playback synchronization", () => {
+         waitForTrack(users.userB.page, track)
+       ]);
+ 
++      await expect(
++        users.userB.page.getByRole("button", { name: "Pause playback" })
++      ).toHaveCount(0);
++      await expect(
++        users.userB.page.locator("svg.lucide-skip-forward")
++      ).toHaveCount(0);
++
++      const nonHostPause = await users.userB.api.post(
++        `/rooms/${room._id}/pause`
++      );
++      expect(nonHostPause.status()).toBe(403);
++
+       // Adding the first track starts the current implementation automatically.
+       // Pause first, then use User A's real UI action to verify play propagation.
+       await users.userA.page
+         .getByRole("button", { name: "Pause playback" })
+         .click();
+-      await waitForPlaybackControl(users.userB.page, "Play playback");
++      await expect.poll(async () => {
++        const storedRoom = await readRoom(users.userA, room._id);
++        return storedRoom.isPlaying;
++      }).toBe(false);
+ 
+       await users.userA.page
+         .getByRole("button", { name: "Play playback" })
+         .click();
+-      await waitForPlaybackControl(users.userB.page, "Pause playback");
++      await expect.poll(async () => {
++        const storedRoom = await readRoom(users.userA, room._id);
++        return storedRoom.isPlaying;
++      }).toBe(true);
+ 
+       const storedRoom = await readRoom(users.userA, room._id);
+       expect(storedRoom.isPlaying).toBe(true);
+@@ -74,7 +91,11 @@ test.describe("realtime playback synchronization", () => {
+       await users.userA.page
+         .getByRole("button", { name: "Pause playback" })
+         .click();
+-      await waitForPlaybackControl(users.userB.page, "Play playback");
++
++      await expect.poll(async () => {
++        const updatedRoom = await readRoom(users.userA, room._id);
++        return updatedRoom.isPlaying;
++      }).toBe(false);
+ 
+       let storedRoom = await readRoom(users.userA, room._id);
+       expect(storedRoom.isPlaying).toBe(false);
+@@ -84,11 +105,11 @@ test.describe("realtime playback synchronization", () => {
+       await users.userA.page
+         .getByRole("button", { name: "Play playback" })
+         .click();
+-      await waitForPlaybackControl(users.userB.page, "Pause playback");
+ 
+-      storedRoom = await readRoom(users.userA, room._id);
+-      expect(storedRoom.isPlaying).toBe(true);
+-      expect(storedRoom.playbackStartedAt).toBeTruthy();
++      await expect.poll(async () => {
++        storedRoom = await readRoom(users.userA, room._id);
++        return Boolean(storedRoom.isPlaying && storedRoom.playbackStartedAt);
++      }).toBe(true);
+     } finally {
+       await disposeUsers(users);
+     }
+@@ -110,18 +131,17 @@ test.describe("realtime playback synchronization", () => {
+         waitForTrack(users.userB.page, first.track)
+       ]);
+ 
+-const responsePromise = users.userA.page.waitForResponse(
+-  response =>
+-    response.url().includes(`/rooms/${room._id}/skip`) &&
+-    response.request().method() === "POST"
+-);
+-
+-await skipButton(users.userA.page).click();
++      const responsePromise = users.userA.page.waitForResponse(
++        (response) =>
++          response.url().includes(`/rooms/${room._id}/skip`) &&
++          response.request().method() === "POST"
++      );
+ 
+-const response = await responsePromise;
++      await skipButton(users.userA.page).click();
+ 
+-console.log("SKIP STATUS:", response.status());
+-console.log("SKIP BODY:", await response.text());      await waitForTrack(users.userB.page, second.track);
++      const response = await responsePromise;
++      expect(response.status()).toBe(200);
++      await waitForTrack(users.userB.page, second.track);
+ 
+       await expect
+   .poll(
+@@ -184,13 +204,26 @@ expect(storedRoom.playbackPosition).toBe(0);
+         )
+         .toBeGreaterThan(1);
+ 
++      await expect
++        .poll(
++          () => users.userB.page.locator("audio").evaluate((audio) => audio.paused),
++          { message: "User B did not start playback after seeking" }
++        )
++        .toBe(false);
++
+       const storedRoom = await readRoom(users.userA, room._id);
+       const expectedPosition = serverPlaybackPosition(storedRoom);
+-      const browserPosition = await users.userB.page
++      const browserPlayback = await users.userB.page
+         .locator("audio")
+-        .evaluate((audio) => audio.currentTime);
+-
+-      expect(Math.abs(browserPosition - expectedPosition)).toBeLessThan(5);
++        .evaluate((audio) => ({
++          currentTime: audio.currentTime,
++          duration: audio.duration,
++          paused: audio.paused,
++          readyState: audio.readyState
++        }));
++      const browserPosition = browserPlayback.currentTime;
++
++      expect(Math.abs(browserPosition - expectedPosition)).toBeLessThan(2);
+     } finally {
+       await disposeUsers(users);
+     }
+diff --git a/Frontend/package-lock.json b/Frontend/package-lock.json
+index ff9776c..87517c5 100644
+--- a/Frontend/package-lock.json
++++ b/Frontend/package-lock.json
+@@ -3709,9 +3709,9 @@
+       "license": "MIT"
+     },
+     "node_modules/baseline-browser-mapping": {
+-      "version": "2.10.13",
+-      "resolved": "https://registry.npmjs.org/baseline-browser-mapping/-/baseline-browser-mapping-2.10.13.tgz",
+-      "integrity": "sha512-BL2sTuHOdy0YT1lYieUxTw/QMtPBC3pmlJC6xk8BBYVv6vcw3SGdKemQ+Xsx9ik2F/lYDO9tqsFQH1r9PFuHKw==",
++      "version": "2.11.28",
++      "resolved": "https://registry.npmjs.org/baseline-browser-mapping/-/baseline-browser-mapping-2.11.28.tgz",
++      "integrity": "sha512-br0LOmjJqr6Rt4AEkadbcNf67Zpo7EPwKsWbjnRrJIa1QYFHQBqM4C7F2WTbV8ahTEcg1Eo+Y0aWjjORInYFyA==",
+       "license": "Apache-2.0",
+       "bin": {
+         "baseline-browser-mapping": "dist/cli.cjs"
+@@ -3863,9 +3863,9 @@
+       }
+     },
+     "node_modules/caniuse-lite": {
+-      "version": "1.0.30001784",
+-      "resolved": "https://registry.npmjs.org/caniuse-lite/-/caniuse-lite-1.0.30001784.tgz",
+-      "integrity": "sha512-WU346nBTklUV9YfUl60fqRbU5ZqyXlqvo1SgigE1OAXK5bFL8LL9q1K7aap3N739l4BvNqnkm3YrGHiY9sfUQw==",
++      "version": "1.0.30001816",
++      "resolved": "https://registry.npmjs.org/caniuse-lite/-/caniuse-lite-1.0.30001816.tgz",
++      "integrity": "sha512-+8Yx7BXCoqk6IF8yTicjfUR6D/ldJzdlsodlEOiOSPmhK844WIgk67/zIQaGAOxNkZyyvBlrRFnLvqKIoqbAFw==",
+       "funding": [
+         {
+           "type": "opencollective",
+diff --git a/Frontend/playwright.config.js b/Frontend/playwright.config.js
+index 61bb168..9a08ef1 100644
+--- a/Frontend/playwright.config.js
++++ b/Frontend/playwright.config.js
+@@ -8,13 +8,13 @@ dotenv.config({
+   path: path.resolve(process.cwd(), ".env.e2e")
+ });
+ const frontendDirectory = path.dirname(fileURLToPath(import.meta.url));
+-const backendDirectory = path.resolve(frontendDirectory, "./Backend");
++const repositoryDirectory = path.resolve(frontendDirectory, "..");
++const backendDirectory = path.join(repositoryDirectory, "Backend");
+ 
+-// The frontend currently calls localhost:5000 directly and the backend allows
+-// localhost:5173 through CORS, so the E2E servers intentionally use those
+-// established development addresses.
+-const frontendUrl = "http://localhost:5173";
+-const backendUrl = "http://localhost:5000";
++// E2E uses dedicated ports so it never reuses active development servers.
++const frontendUrl = "http://localhost:5174";
++const backendUrl = "http://localhost:5001";
++const musicProviderUrl = "http://localhost:5051";
+ 
+ const requiredEnvironment = [
+   "JAMIFY_E2E_MONGODB_URI",
+@@ -53,31 +53,51 @@ export default defineConfig({
+     {
+       name: "chromium",
+       use: {
+-        ...devices["Desktop Chrome"]
++        ...devices["Desktop Chrome"],
++        launchOptions: {
++          args: ["--autoplay-policy=no-user-gesture-required"]
++        }
+       }
+     }
+   ],
+   webServer: [
++    {
++      command: "node e2e/music-provider-stub.js",
++      cwd: backendDirectory,
++      url: `${musicProviderUrl}/health`,
++      timeout: 30_000,
++      reuseExistingServer: false,
++      env: {
++        ...process.env,
++        MUSIC_PROVIDER_PORT: "5051"
++      }
++    },
+     {
+       command: "npm run start",
+       cwd: backendDirectory,
+       url: `${backendUrl}/rooms`,
+       timeout: 120_000,
+-      reuseExistingServer: !process.env.CI,
++      reuseExistingServer: false,
+       env: {
+         ...process.env,
+-        PORT: "5000",
++        PORT: "5001",
+         MONGODB_URI: process.env.JAMIFY_E2E_MONGODB_URI,
+         REDIS_URL: process.env.JAMIFY_E2E_REDIS_URL,
+         JWT_SECRET: process.env.JAMIFY_E2E_JWT_SECRET,
+-          MUSIC_PROVIDER_BASE_URL: "http://localhost:5050"
++        CLIENT_ORIGIN: frontendUrl,
++        MUSIC_PROVIDER_BASE_URL: musicProviderUrl
+       }
+     },
+     {
+-      command: "npm run dev -- --host localhost --port 5173",
++      command: "npm run dev -- --host localhost --port 5174",
+       cwd: frontendDirectory,
+       url: frontendUrl,
+       timeout: 120_000,
+-      reuseExistingServer: !process.env.CI
+-    },]
++      reuseExistingServer: false,
++      env: {
++        ...process.env,
++        VITE_API_URL: backendUrl
++      }
++    }
++  ]
+ });
+diff --git a/Frontend/src/components/Navbar.jsx b/Frontend/src/components/Navbar.jsx
+index 0271f55..a29877f 100644
+--- a/Frontend/src/components/Navbar.jsx
++++ b/Frontend/src/components/Navbar.jsx
+@@ -16,6 +16,7 @@ import {
+ 
+ const GENRES = ["Pop", "Lo-Fi", "Hip-Hop", "Electronic", "Acoustic"];
+ const VIBES = ["Chill", "Energetic", "Focus", "Hype", "Relaxed"];
++const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+ 
+ export default function Navbar() {
+   const navigate = useNavigate();
+@@ -55,7 +56,7 @@ export default function Navbar() {
+ 
+     // sending POST request to backend
+     const res = await fetch(
+-      "http://localhost:5000/rooms",
++      `${API_URL}/rooms`,
+       {
+ 
+         method: "POST",
+diff --git a/Frontend/src/pages/Room.jsx b/Frontend/src/pages/Room.jsx
+index b9d0ad7..6a68535 100644
+--- a/Frontend/src/pages/Room.jsx
++++ b/Frontend/src/pages/Room.jsx
+@@ -1,4 +1,4 @@
+-import { useState, useEffect, useRef } from "react"; //useref is to control audio element through react
++import { useState, useEffect, useRef, useCallback } from "react"; //useref is to control audio element through react
+ import { Play, Pause, SkipForward, Share2, ChevronLeft, Search, X, Disc3, Music, GripVertical, Crown } from "lucide-react";
+ import { Button } from "@/components/ui/button";
+ import { Input } from "@/components/ui/input";
+@@ -15,6 +15,8 @@ import { searchMusic } from "@/services/musicService.js";
+ import { getPlaybackPosition } from "@/utils/playback.js"; // Import the getPlaybackPosition function
+ import { useAuth } from "../AuthContext";
+ 
++const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
++
+ const formatTime = (seconds) => {
+   if (!seconds || Number.isNaN(seconds)) return "0:00";
+   const minutes = Math.floor(seconds / 60);
+@@ -179,8 +181,9 @@ export default function Rooms() {
+     if (!audio) return;
+     audio.pause();
+     if (!trackId) return;
+-    // React's onLoadedMetadata handler is already attached to the element.
+-    audio.load();
++    // Changing the audio element's src causes the browser to load the new
++    // media. Calling audio.load() here can start a second load after metadata
++    // arrives, reset currentTime to zero, and undo a late joiner's seek.
+   }, [room?.currentTrack?.providerTrackId]);
+   // The only effect that seeks and starts playback.
+ 
+@@ -205,9 +208,11 @@ export default function Rooms() {
+       if (Math.abs(audio.currentTime - target) > 0.25) {
+         await new Promise((resolve, reject) => {
+           let finished = false;
++          let timeoutId;
+           const cleanup = () => {
+             audio.removeEventListener("seeked", onSeeked);
+             audio.removeEventListener("error", onError);
++            window.clearTimeout(timeoutId);
+             if (cancelPendingSeek === cancel) {
+               cancelPendingSeek = null;
+             }
+@@ -227,10 +232,11 @@ export default function Rooms() {
+           audio.addEventListener("seeked", onSeeked);
+           audio.addEventListener("error", onError);
+           try {
++            timeoutId = window.setTimeout(
++              () => finish(new Error("Audio seek timed out")),
++              5000
++            );
+             audio.currentTime = target;
+-            if (!audio.seeking) {
+-              finish();
+-            }
+           } catch (error) {
+             finish(error);
+           }
+@@ -288,7 +294,7 @@ export default function Rooms() {
+     setIsPlaybackRequestPending(true);
+     setPlaybackError("");
+     try {
+-      const response = await fetch(`http://localhost:5000/rooms/${id}/${action}`, {
++      const response = await fetch(`${API_URL}/rooms/${id}/${action}`, {
+         method: "POST",
+         headers: {
+           "Content-Type": "application/json"
+@@ -313,7 +319,7 @@ export default function Rooms() {
+ 
+   const handlePause = () => changePlayback("pause");
+ 
+-  const resumeSyncedAudio = () => {
++  const resumeSyncedAudio = useCallback(() => {
+     const audio = audioRef.current;
+     const latestRoom = roomRef.current;
+ 
+@@ -344,7 +350,16 @@ export default function Rooms() {
+       console.error("Failed to prepare local synced audio:", error);
+       setAutoplayBlocked(true);
+     }
+-  };
++  }, []);
++
++  useEffect(() => {
++    if (!autoplayBlocked) return undefined;
++
++    const resumeOnInteraction = () => resumeSyncedAudio();
++    window.addEventListener("pointerdown", resumeOnInteraction, { once: true });
++
++    return () => window.removeEventListener("pointerdown", resumeOnInteraction);
++  }, [autoplayBlocked, resumeSyncedAudio]);
+ 
+   const handleSkip = async () => {
+     // Prevent duplicate skip requests from repeated clicks.
+@@ -353,7 +368,7 @@ export default function Rooms() {
+     setPlaybackError("");
+     try {
+       const response = await fetch(
+-        `http://localhost:5000/rooms/${id}/skip`,
++        `${API_URL}/rooms/${id}/skip`,
+         {
+           method: "POST",
+           credentials: "include"
+@@ -661,15 +676,18 @@ export default function Rooms() {
+                 {playbackError}
+               </p>
+             )}
++            {autoplayBlocked && isPlaying && (
++              <p className="mt-1 text-[10px] text-neutral-500">
++                Tap anywhere to enable audio
++              </p>
++            )}
+           </div>
+-          <div className="flex items-center gap-2 sm:gap-4 pr-2 shrink-0">
++          {isHost && (
++            <div className="flex items-center gap-2 sm:gap-4 pr-2 shrink-0">
+               <button
+                 type="button"
+                 disabled={!hasTrack || isPlaybackRequestPending}
+-                aria-label={
+-                  autoplayBlocked && isPlaying ? "Play audio" :
+-                    isPlaying ? "Pause playback" : "Play playback"
+-                }
++                aria-label={isPlaying ? "Pause playback" : "Play playback"}
+                 onClick={() => {
+                   if (!hasTrack || isPlaybackRequestPending) return;
+                   if (autoplayBlocked && isPlaying) {
+@@ -680,15 +698,16 @@ export default function Rooms() {
+                 }}
+                 className={`w-12 h-12 rounded-full flex items-center justify-center transition-all shadow-md active:scale-95 ${hasTrack && !isPlaybackRequestPending ? "bg-white text-black hover:scale-105" : "bg-neutral-800 text-neutral-600 cursor-not-allowed"}`}
+               >
+-                {isPlaying && hasTrack && !autoplayBlocked ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" className="ml-1" />}
++                {isPlaying && hasTrack ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" className="ml-1" />}
+               </button>
+-              <button disabled={!hasTrack} onClick={handleSkip} className={`text-neutral-400 hover:text-white transition-colors active:scale-95 ${!hasTrack ? "opacity-30 cursor-not-allowed"
++              <button disabled={!hasTrack} onClick={handleSkip} className={`text-neutral-400 hover:text-white transition-colors hidden sm:block active:scale-95 ${!hasTrack ? "opacity-30 cursor-not-allowed"
+                 : ""
+                 }`}
+               >
+                 <SkipForward size={20} fill="currentColor" className="opacity-50 hover:opacity-100" />
+               </button>
+-          </div>
++            </div>
++          )}
+         </motion.div>
+       </div>
+     </div>
+diff --git a/Frontend/src/services/authService.js b/Frontend/src/services/authService.js
+index 083febe..b04f395 100644
+--- a/Frontend/src/services/authService.js
++++ b/Frontend/src/services/authService.js
+@@ -1,7 +1,9 @@
++const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
++
+ //frontend ka backend se api communication ka code , "Backend ko login request exactly kaise bhejni hai."
+ export const loginUser = async (email, password) => {
+ 
+-  const res = await fetch("http://localhost:5000/auth/login", {
++  const res = await fetch(`${API_URL}/auth/login`, {
+ 
+     method: "POST",
+ 
+@@ -33,7 +35,7 @@ export const loginUser = async (email, password) => {
+ // The browser automatically sends the HttpOnly accessToken cookie.
+ export const getCurrentUser = async () => {
+ 
+-  const res = await fetch("http://localhost:5000/auth/me", {
++  const res = await fetch(`${API_URL}/auth/me`, {
+ 
+     method: "GET",
+ 
+@@ -60,7 +62,7 @@ export const getCurrentUser = async () => {
+ // The browser sends the HttpOnly cookies; JavaScript never reads the tokens.
+ export const logoutUser = async () => {
+ 
+-  const res = await fetch("http://localhost:5000/auth/logout", {
++  const res = await fetch(`${API_URL}/auth/logout`, {
+ 
+     method: "POST",
+ 
+diff --git a/Frontend/src/services/musicService.js b/Frontend/src/services/musicService.js
+index 5fb6a91..1c0c1db 100644
+--- a/Frontend/src/services/musicService.js
++++ b/Frontend/src/services/musicService.js
+@@ -1,4 +1,4 @@
+-const API_URL = "http://localhost:5000";
++const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+ 
+ // Search songs through OUR backend.
+ // Frontend never calls the JioSaavn Worker directly.
+@@ -39,4 +39,4 @@ export const getMusicById = async (id) => {
+   }
+ 
+   return data.song;
+-};
+\ No newline at end of file
++};
+diff --git a/Frontend/src/services/roomService.js b/Frontend/src/services/roomService.js
+index 5535c8b..7ec4896 100644
+--- a/Frontend/src/services/roomService.js
++++ b/Frontend/src/services/roomService.js
+@@ -1,18 +1,20 @@
++const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
++
+ export const getRooms = async () => {
+ 
+-  const res = await fetch("http://localhost:5000/rooms");
++  const res = await fetch(`${API_URL}/rooms`);
+ 
+   const data = await res.json();
+ 
+   return data;
+ };
+ export const getRoomById = async (id) => {
+-    const res = await fetch(`http://localhost:5000/rooms/${id}`);
++    const res = await fetch(`${API_URL}/rooms/${id}`);
+     const data = await res.json();
+     return data;
+ }
+ export const joinRoom = async (roomId) => {
+-  const res = await fetch(`http://localhost:5000/rooms/${roomId}/join`, {
++  const res = await fetch(`${API_URL}/rooms/${roomId}/join`, {
+     method: "POST",
+     credentials: "include"
+   });
+@@ -26,7 +28,7 @@ export const joinRoom = async (roomId) => {
+ };
+ export const addsongToQueue = async (roomId, song) => {
+ 
+-  const res = await fetch(`http://localhost:5000/rooms/${roomId}/queue`, {
++  const res = await fetch(`${API_URL}/rooms/${roomId}/queue`, {
+     method: "POST",
+     credentials: "include",
+     headers: {
+@@ -40,7 +42,7 @@ export const addsongToQueue = async (roomId, song) => {
+   return data;
+ }
+ export const removeSongfromqueue = async (roomId, songId) => {
+-    const res = await fetch(`http://localhost:5000/rooms/${roomId}/queue/${songId}`, {
++    const res = await fetch(`${API_URL}/rooms/${roomId}/queue/${songId}`, {
+         method: "DELETE",
+         credentials: "include",
+         headers: {
+diff --git a/Frontend/src/socket.js b/Frontend/src/socket.js
+index e7cea70..2ea74bc 100644
+--- a/Frontend/src/socket.js
++++ b/Frontend/src/socket.js
+@@ -1,6 +1,9 @@
+ import { io } from "socket.io-client";
++
++const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
++
+ export const createSocket = () => {
+-  return io("http://localhost:5000", {
++  return io(API_URL, {
+     withCredentials: true,
+     // The Room page attaches its event handlers before opening the connection.
+     autoConnect: false
+diff --git a/PROJECT_CONTEXT.md b/PROJECT_CONTEXT.md
+index 87b7c99..b7636dc 100644
+--- a/PROJECT_CONTEXT.md
++++ b/PROJECT_CONTEXT.md
+@@ -180,9 +180,8 @@ Server changes authoritative state, then broadcasts the resulting state.
+ 
+ Playback is backend-controlled.
+ 
+-Any authenticated room member may use the shared play, pause, and skip
+-commands. The backend verifies membership before changing room state; the host
+-is not the sole playback controller.
++Only the room host may use shared play, pause, and skip commands. The frontend
++hides those controls for listeners, and the backend enforces the same rule.
+ 
+ Late joiners seek from `playbackPosition` and `playbackStartedAt`. If a browser
+ blocks automatic audio, the regular local Play control starts that listener at
+@@ -472,10 +471,10 @@ Do not rebuild earlier systems from scratch.
+ 22. E2E Testing Foundation
+ 
+ Playwright E2E tests live in `Frontend/e2e/` and use the real frontend,
+-Express backend, MongoDB, Redis, cookie authentication, Socket.IO, and music
+-provider. The suite creates distinct temporary User A/User B accounts and
+-opens them in separate browser contexts; it does not use two tabs sharing one
+-session.
++Express backend, MongoDB, Redis, cookie authentication, Socket.IO, and a local
++music-provider stub that serves a real ranged WAV stream. The suite creates
++distinct temporary User A/User B accounts and opens them in separate browser
++contexts; it does not use two tabs sharing one session.
+ 
+ Available commands from `Frontend/`:
+ 
